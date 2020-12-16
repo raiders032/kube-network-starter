@@ -14,4 +14,9 @@ spec:
     spec:
       containers:
         - name: users
-          image: neptunes032/kub-demo-user
+          image: neptunes032/kub-demo-user:latest
+          env:
+            - name: AUTH_ADDRESS
+              value: localhost
+        - name: auth
+          image: neptunes032/kub-demo-auth:latest
