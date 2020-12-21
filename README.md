@@ -254,6 +254,7 @@ kubectl apply -f users-deployment.yaml
 
 * Auth API
   * 독립된 pod 에 위치
+  * 외부 접근은 허용하지 않는다. 클러스터 안에서만 접근 가능하도록
 * User API 
   * 독립된 pod 에 위치
   * Auth API 서버에 요청을 보낸다.
@@ -262,3 +263,205 @@ kubectl apply -f users-deployment.yaml
   * 독립된 pod 에 위치
   * Auth API 서버에 요청을 보낸다.
     * Cluster-internal communication
+
+
+
+## Auth API
+
+### Deployment 리소스 생성
+
+* auth-deployment.yaml 작성
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+        - name: auth
+          image: neptunes032/kub-demo-auth
+
+```
+
+### Service 리소스 생성
+
+* auth-service.yaml 작성
+* 외부 접근은 허용하지 않는다. 클러스터 안에서만 접근 가능하도록 `ClusterIP` 타입을 사용한다.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+spec:
+  selector:
+    app: auth
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+
+```
+
+```bash
+kubectl apply -f auth-deployment.yaml -f auth-service.yaml
+```
+
+
+
+## User API
+
+### Deployment 리소스 수정
+
+* users-deployment.yaml 수정
+* Auth 애플리케이션을 분리
+* 앞서 생성한 auth-service에 어떻게 접근할까?
+
+```bash
+kubectl apply -f auth-deployment.yaml -f auth-service.yaml
+# auth-service의 IP 주소 확인
+kubectl get service
+NAME           TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+auth-service   ClusterIP   10.101.220.154   <none>        80/TCP    19s
+kubernetes     ClusterIP   10.96.0.1        <none>        443/TCP   3d9h
+```
+
+```yaml
+# users-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: users-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: users
+  template:
+    metadata:
+      labels:
+        app: users
+    spec:
+      containers:
+        - name: users
+          image: neptunes032/kub-demo-user:latest
+          env:
+            - name: AUTH_ADDRESS
+              value: "10.101.220.154"
+
+```
+
+```bash
+kubectl apply -f users-deployment.yaml
+
+# auth와 users 애플리케이션이 각각 다른 pod에서 동작하는걸 확인 할 수 있다.
+kubectl get pods
+NAME                               READY   STATUS    RESTARTS   AGE
+auth-deployment-5954dcff87-z9542   1/1     Running   0          5m34s
+users-deployment-74d54d9c7-7zx2w   1/1     Running   0          2m28s
+
+minikube service users-service
+|-----------|---------------|-------------|-----------------------------|
+| NAMESPACE |     NAME      | TARGET PORT |             URL             |
+|-----------|---------------|-------------|-----------------------------|
+| default   | users-service |        8080 | http://192.168.99.101:31219 |
+|-----------|---------------|-------------|-----------------------------|
+🎉  Opening service default/users-service in default browser...
+```
+
+
+
+### 동작 확인
+
+* 정상적으로 작동한다.
+
+![image-20201221193927365](./images/image-20201221193927365.png)
+
+![image-20201221193951246](./images/image-20201221193951246.png)
+
+### 문제점
+
+* 직접 service의 IP 주소를 찾는것은 번거롭다.
+
+
+
+### 해결
+
+* 쿠버네티스에 의해 자동으로 제공되는 환경변수를 사용한다.
+  * `SERVICENAME_SERVICE_HOST` : 서비스의 IP 주소
+* users-app.js 를 수정한다.
+
+```javascript
+# 수정 전
+const hashedPW = await axios.get(`http://${process.env.AUTH_ADDRESS}/hashed-password/` + password);
+
+# 수정 후
+const hashedPW = await axios.get(`http://${process.env.AUTH_SERVICE_SERVICE_HOST}/hashed-password/` + password);
+```
+
+```javascript
+# 수정 전
+const response = await axios.get(
+  `http://${process.env.AUTH_ADDRESS}/token/` + hashedPassword + '/' + password
+);
+# 수정 후
+const response = await axios.get(
+  `http://${process.env.AUTH_SERVICE_SERVICE_HOST}/token/` + hashedPassword + '/' + password
+);
+```
+
+* 이미지 재빌드
+
+```bash
+ls
+Dockerfile   package.json users-app.js
+docker build -t neptunes032/kub-demo-user .
+docker push neptunes032/kub-demo-user
+cd ../kubernetes
+
+# users-deployment.yaml에 수정사항이 없어 적용되지 않았다.
+kubectl apply -f users-deployment.yaml
+deployment.apps/users-deployment unchanged
+
+kubectl delete -f users-deployment.yaml
+kubectl apply -f users-deployment.yaml
+```
+
+* Docker-compose.yaml 수정
+
+```yaml
+version: "3"
+services:
+  auth:
+    build: ./auth-api
+  users:
+    build: ./users-api
+    environment:
+      AUTH_ADDRESS: auth
+      AUTH_SERVICE_SERVICE_HOST: auth
+    ports:
+      - "8080:8080"
+  tasks:
+    build: ./tasks-api
+    ports:
+      - "8000:8000"
+    environment:
+      TASKS_FOLDER: tasks
+
+```
+
+### 동작 확인
+
+* 정상작동한다.
+
