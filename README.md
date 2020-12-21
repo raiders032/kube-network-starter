@@ -322,11 +322,18 @@ kubectl apply -f auth-deployment.yaml -f auth-service.yaml
 
 ## User API
 
-### Deployment 리소스 수정
+
+
+### Pod-to-Pod Communication
+
+* 앞서 생성한 auth-service에 어떻게 소통할까?
+
+### 해결법 1 : 매뉴얼적인 방법
+
+Deployment 리소스 수정
 
 * users-deployment.yaml 수정
 * Auth 애플리케이션을 분리
-* 앞서 생성한 auth-service에 어떻게 접근할까?
 
 ```bash
 kubectl apply -f auth-deployment.yaml -f auth-service.yaml
@@ -380,9 +387,7 @@ minikube service users-service
 🎉  Opening service default/users-service in default browser...
 ```
 
-
-
-### 동작 확인
+동작 확인
 
 * 정상적으로 작동한다.
 
@@ -390,13 +395,13 @@ minikube service users-service
 
 ![image-20201221193951246](./images/image-20201221193951246.png)
 
-### 문제점
+문제점
 
 * 직접 service의 IP 주소를 찾는것은 번거롭다.
 
 
 
-### 해결
+### 해결법 2: 제공되는 환경변수
 
 * 쿠버네티스에 의해 자동으로 제공되는 환경변수를 사용한다.
   * `SERVICENAME_SERVICE_HOST` : 서비스의 IP 주소
@@ -461,7 +466,84 @@ services:
 
 ```
 
-### 동작 확인
+동작 확인
 
 * 정상작동한다.
 
+
+
+### 해결법 3 : CoreDNS
+
+* 모든 서비스는 클러스터 내에서 사용되는 도메인 네임을 가지고 있다.
+  * `servicename.namespacename` : 도메인 네임
+  * 클러스터 내에서만 사용 가능
+* 3가지 방법중 가장 많이 사용된다.
+
+* users-app.js 를 수정한다.
+
+```javascript
+# 수정 전
+const hashedPW = await axios.get(`http://${process.env.AUTH_SERVICE_SERVICE_HOST}/hashed-password/` + password);
+
+# 수정 후
+const hashedPW = await axios.get(`http://${process.env.AUTH_ADDRESS}/hashed-password/` + password);
+```
+
+```javascript
+# 수정 전
+const response = await axios.get(
+  `http://${process.env.AUTH_SERVICE_SERVICE_HOST}/token/` + hashedPassword + '/' + password
+);
+
+# 수정 후
+const response = await axios.get(
+  `http://${process.env.AUTH_ADDRESS}/token/` + hashedPassword + '/' + password
+);
+```
+
+* users-deployment.yaml 수정한다.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: users-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: users
+  template:
+    metadata:
+      labels:
+        app: users
+    spec:
+      containers:
+        - name: users
+          image: neptunes032/kub-demo-user:latest
+          env:
+            - name: AUTH_ADDRESS
+              value: "auth-service.default"
+
+```
+
+* 이미지 재빌드
+
+```bash
+ls
+Dockerfile   package.json users-app.js
+docker build -t neptunes032/kub-demo-user .
+docker push neptunes032/kub-demo-user
+cd ../kubernetes
+
+# users-deployment.yaml에 수정사항이 없어 적용되지 않았다.
+kubectl apply -f users-deployment.yaml
+deployment.apps/users-deployment unchanged
+
+kubectl delete -f users-deployment.yaml
+kubectl apply -f users-deployment.yaml
+```
+
+동작 확인
+
+* 정상작동한다.
