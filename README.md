@@ -547,3 +547,108 @@ kubectl apply -f users-deployment.yaml
 동작 확인
 
 * 정상작동한다.
+
+## Tasks API
+
+### 코드 수정
+
+* tasks-app.js 수정
+* Auth API의 도메인을 환경변수로 받아오도록 변경
+
+```javascript
+# 추가
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  next();
+})
+
+# 수정 전
+const response = await axios.get('http://auth/verify-token/' + token);
+
+# 수정 후
+const response = await axios.get(`http://${process.env.AUTH_ADDRESS}/verify-token/` + token);
+```
+
+### 이미지 빌드
+
+* 도커 허브에 kub-demo-tasks 리포지토리 생성
+* 이미지 빌드 후 도커 허브에 push
+
+```bash
+ls
+Dockerfile   package.json tasks-app.js
+docker build -t neptunes032/kub-demo-tasks .
+docker push neptunes032/kub-demo-tasks
+```
+
+### Deployment 리소스 생성
+
+* tasks-deployment.yaml 작성
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tasks-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tasks
+  template:
+    metadata:
+      labels:
+        app: tasks
+    spec:
+      containers:
+        - name: tasks
+          image: neptunes032/kub-demo-tasks:latest
+          env:
+            - name: AUTH_ADDRESS
+              value: "auth-service.default"
+            - name: TASKS_FOLDER
+              value: tasks
+```
+
+```bash
+kubectl apply -f tasks-deployment.yaml
+```
+
+### Service 리소스 생성
+
+* tasks-service.yaml 작성
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tasks-service
+spec:
+  selector:
+    app: tasks
+  type: LoadBalancer
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+```
+
+```bash
+kubectl apply -f tasks-service.yaml
+```
+
+### 확인
+
+```bash
+minikube service tasks-service
+|-----------|---------------|-------------|-----------------------------|
+| NAMESPACE |     NAME      | TARGET PORT |             URL             |
+|-----------|---------------|-------------|-----------------------------|
+| default   | tasks-service |        8000 | http://192.168.99.101:32369 |
+|-----------|---------------|-------------|-----------------------------|
+🎉  Opening service default/tasks-service in default browser...
+```
+
