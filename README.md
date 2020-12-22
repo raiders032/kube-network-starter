@@ -652,3 +652,106 @@ minikube service tasks-service
 🎉  Opening service default/tasks-service in default browser...
 ```
 
+![image-20201222210008566](./images/image-20201222210008566.png)
+
+![image-20201222210047954](./images/image-20201222210047954.png)
+
+## frontend 배포하기
+
+### 코드 수정
+
+* frontend/src/App.js 수정
+* Tasks API로 요청을 보낼 때 다음과 같이 도메인을 tasks-service의 IP 주소로 수정한다.
+
+```bash
+# tasks-service의 IP 주소 확인
+minikube service tasks-service
+|-----------|---------------|-------------|-----------------------------|
+| NAMESPACE |     NAME      | TARGET PORT |             URL             |
+|-----------|---------------|-------------|-----------------------------|
+| default   | tasks-service |        8000 | http://192.168.99.101:32369 |
+|-----------|---------------|-------------|-----------------------------|
+🎉  Opening service default/tasks-service in default browser...
+```
+
+```javascript
+const fetchTasks = useCallback(function () {
+    fetch('http://192.168.99.101:32369/tasks', {
+		...
+    }
+}
+function addTaskHandler(task) {
+    fetch('http://192.168.99.101:32369/tasks', {
+      ...
+    }
+}
+```
+
+### 이미지빌드
+
+* 도커 허브에서 kub-demo-frontend 리포지토리 생성 
+* 디렉토리: frontend
+
+```bash
+docker build -t neptunes032/kub-demo-frontend .
+docker push neptunes032/kub-demo-frontend
+```
+
+### Deployment & Service 리소스 생성
+
+* frontend-deployment.yaml 작성
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: neptunes032/kub-demo-frontend:latest
+```
+
+* frontend-service.yaml 작성
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  selector:
+    app: frontend
+  type: LoadBalancer
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+```
+
+```bash
+kubectl apply -f frontend-deployment.yaml -f frontend-service.yaml
+minikube service frontend-service
+|-----------|------------------|-------------|-----------------------------|
+| NAMESPACE |       NAME       | TARGET PORT |             URL             |
+|-----------|------------------|-------------|-----------------------------|
+| default   | frontend-service |          80 | http://192.168.99.101:31597 |
+|-----------|------------------|-------------|-----------------------------|
+🎉  Opening service default/frontend-service in default browser...
+```
+
+### 확인
+
+* 정상적으로 동작한다.
+
+![image-20201222211239174](./images/image-20201222211239174.png)
+
